@@ -1,0 +1,95 @@
+name: KnowCode review
+description: >-
+  Runs `knowcode review` on a pull request, in KnowCode's restricted mode, and posts the result: a comment with the
+  review and SARIF to code scanning. No model call and no hosted service.
+author: bubstackdev
+branding:
+  icon: git-pull-request
+  color: blue
+
+inputs:
+  version:
+    description: KnowCode release to install (its tag without the `v`). Each release of this action pins one.
+    default: "0.8.0"
+  base:
+    description: Commit, branch or tag to review the change against. Default, the pull request's base commit.
+    default: ""
+  comment:
+    description: Post the review as a pull request comment (updated in place on later runs).
+    default: "true"
+  sarif:
+    description: Upload the review's SARIF to code scanning (needs `security-events: write`).
+    default: "true"
+  cache:
+    description: Keep KnowCode's index in the Actions cache between runs.
+    default: "true"
+  token:
+    description: Token for the comment and the release download. Default, the workflow's own GITHUB_TOKEN.
+    default: ${{ github.token }}
+
+outputs:
+  markdown:
+    description: Path of the review as markdown.
+    value: ${{ steps.review.outputs.markdown }}
+  sarif:
+    description: Path of the review as SARIF.
+    value: ${{ steps.review.outputs.sarif }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install KnowCode
+      id: install
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        KC_VERSION: ${{ inputs.version }}
+      run: |
+        bin=$("$GITHUB_ACTION_PATH/scripts/install.sh" "$KC_VERSION" "$RUNNER_TEMP/knowcode-bin")
+        echo "bin=$bin" >> "$GITHUB_OUTPUT"
+
+    - name: Restore KnowCode's index
+      if: inputs.cache == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/knowcode-cache
+        key: knowcode-${{ inputs.version }}-${{ runner.os }}-${{ runner.arch }}-${{ github.repository }}-${{ github.sha }}
+        restore-keys: |
+          knowcode-${{ inputs.version }}-${{ runner.os }}-${{ runner.arch }}-${{ github.repository }}-
+
+    - name: Review the change
+      id: review
+      shell: bash
+      env:
+        KC_BIN: ${{ steps.install.outputs.bin }}
+        KC_BASE: ${{ inputs.base || github.event.pull_request.base.sha }}
+      run: |
+        if [ -z "$KC_BASE" ]; then
+          echo "knowcode-ci: no base to review against: set the action's 'base' input, or run it on pull_request" >&2
+          exit 1
+        fi
+        # The base commit must be in the clone; a shallow checkout fetches it here, before KnowCode runs (KnowCode
+        # itself never touches the network).
+        git -C "$GITHUB_WORKSPACE" cat-file -e "$KC_BASE^{commit}" 2>/dev/null || git -C "$GITHUB_WORKSPACE" fetch --no-tags --depth=1 origin "$KC_BASE"
+        out="$RUNNER_TEMP/knowcode-review"
+        python3 "$GITHUB_ACTION_PATH/scripts/kc_ci.py" review --knowcode "$KC_BIN" --repo "$GITHUB_WORKSPACE" \
+          --base "$KC_BASE" --out "$out" --cache "$RUNNER_TEMP/knowcode-cache"
+        echo "markdown=$out/review.md" >> "$GITHUB_OUTPUT"
+        echo "sarif=$out/review.sarif" >> "$GITHUB_OUTPUT"
+        cat "$out/review.md" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Comment on the pull request
+      if: inputs.comment == 'true' && github.event.pull_request.number
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        PR: ${{ github.event.pull_request.number }}
+        BODY: ${{ steps.review.outputs.markdown }}
+      run: python3 "$GITHUB_ACTION_PATH/scripts/post.py" github --repo "$GITHUB_REPOSITORY" --pr "$PR" --body "$BODY"
+
+    - name: Upload SARIF
+      if: inputs.sarif == 'true'
+      uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+      with:
+        sarif_file: ${{ steps.review.outputs.sarif }}
+        category: knowcode-review

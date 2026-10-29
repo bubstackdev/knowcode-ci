@@ -1,0 +1,60 @@
+# KnowCode review for GitLab merge requests: runs `knowcode review` on the merge request's change in KnowCode's
+# restricted mode, posts the review as a merge request note (updated in place) and reports its findings as a code
+# quality report. No model call and no hosted service.
+#
+# Use it from .gitlab-ci.yml:
+#
+#   include:
+#     - remote: https://raw.githubusercontent.com/bubstackdev/knowcode-ci/v0/gitlab/knowcode-review.gitlab-ci.yml
+#
+# and set a CI/CD variable KNOWCODE_GITLAB_TOKEN: a project access token with the `api` scope and the Reporter role,
+# which the job uses to post the note (GitLab's job token can't). Without it the review is still in the job's
+# artifacts and the code quality report. The attestation check of the KnowCode release reads GitHub's API without a
+# token; set GH_TOKEN to any GitHub token if your runners hit its anonymous rate limit.
+
+variables:
+  KNOWCODE_VERSION: "0.8.0"
+  KNOWCODE_CI_REF: "v0.8.0"
+  KNOWCODE_GH_VERSION: "2.102.0"
+
+knowcode-review:
+  stage: test
+  # KnowCode's Linux builds need glibc 2.39 or later (Debian 13, Ubuntu 24.04).
+  image: python:3.12-trixie@sha256:17b9724493d916f56565c131f389faff2597f46dec6ce09516f95125bc9f519f
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  variables:
+    GIT_DEPTH: "0"
+  cache:
+    key: knowcode-$KNOWCODE_VERSION
+    paths:
+      - .knowcode-cache/
+  before_script:
+    # The scripts of this template's release, and a GitHub CLI to check the KnowCode release's attestation with.
+    - ci="$(mktemp -d)"
+    - curl -fsSL "https://github.com/bubstackdev/knowcode-ci/archive/refs/tags/$KNOWCODE_CI_REF.tar.gz" | tar -xz -C "$ci" --strip-components=1
+    - '"$ci/scripts/install-gh.sh" "$KNOWCODE_GH_VERSION" "$ci/gh"'
+    - export PATH="$ci/gh/bin:$PATH"
+    - bin="$("$ci/scripts/install.sh" "$KNOWCODE_VERSION" "$ci/knowcode-bin")"
+  script:
+    # KnowCode writes nothing into the checkout: its cache and the outputs live outside it, and are moved in only to
+    # be kept (the cache, the artifacts) after the run's check that the checkout is unchanged.
+    - out="$(mktemp -d)"
+    - if [ -d .knowcode-cache ]; then mv .knowcode-cache "$out/cache"; fi
+    - git cat-file -e "$CI_MERGE_REQUEST_DIFF_BASE_SHA^{commit}"
+    - python3 "$ci/scripts/kc_ci.py" review --knowcode "$bin" --repo "$CI_PROJECT_DIR" --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --out "$out/review" --cache "$out/cache"
+    - python3 "$ci/scripts/kc_ci.py" codequality "$out/review/review.sarif" "$out/review/gl-code-quality-report.json"
+    - |
+      if [ -n "${KNOWCODE_GITLAB_TOKEN:-}" ]; then
+        python3 "$ci/scripts/post.py" gitlab --api "$CI_API_V4_URL" --project "$CI_PROJECT_ID" --mr "$CI_MERGE_REQUEST_IID" --body "$out/review/review.md"
+      else
+        echo "knowcode-ci: KNOWCODE_GITLAB_TOKEN isn't set, so the review isn't posted; it is in the job's artifacts"
+      fi
+    - mkdir -p knowcode-review && cp "$out/review/review.md" "$out/review/review.sarif" "$out/review/gl-code-quality-report.json" "$out/review/checks.json" knowcode-review/
+    - mv "$out/cache" .knowcode-cache
+  artifacts:
+    when: always
+    paths:
+      - knowcode-review/
+    reports:
+      codequality: knowcode-review/gl-code-quality-report.json

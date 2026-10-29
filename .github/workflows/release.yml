@@ -1,0 +1,30 @@
+# Moves the major tag (`v0`) to a release tag's commit, so `uses: bubstackdev/knowcode-ci@v0` gets the latest
+# release. This workflow is the only thing that moves it: a release is tagged `vMAJOR.MINOR.PATCH` by hand on main,
+# and the major tag follows here. No other tag is ever moved.
+name: Release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions:
+  contents: write
+
+jobs:
+  major-tag:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Move the major tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          git merge-base --is-ancestor "$TAG" origin/main || { echo "$TAG is not on main" >&2; exit 1; }
+          major="${TAG%%.*}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f -a "$major" -m "$major: $TAG" "$TAG^{commit}"
+          git push --force origin "refs/tags/$major"
