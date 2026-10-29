@@ -1,6 +1,12 @@
 # Moves the major tag (`v0`) to a release tag's commit, so `uses: bubstackdev/knowcode-ci@v0` gets the latest
 # release. This workflow is the only thing that moves it: a release is tagged `vMAJOR.MINOR.PATCH` by hand on main,
 # and the major tag follows here. No other tag is ever moved.
+#
+# The repository's tag rules let only a deploy key create, move or delete a major tag (`v*` but not `v*.*.*`), so the
+# push uses one: MAJOR_TAG_DEPLOY_KEY, the private half of the repository's only write deploy key, a secret of the
+# `release` environment, which only `v*.*.*` tags may deploy to. No other workflow or branch can read it, and the
+# GITHUB_TOKEN here stays read-only. GitHub's SSH host key is pinned below (its published ED25519 key,
+# SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU).
 name: Release
 
 on:
@@ -8,23 +14,37 @@ on:
     tags: ["v[0-9]+.[0-9]+.[0-9]+"]
 
 permissions:
-  contents: write
+  contents: read
+
+# Two release tags pushed together move the major tag one at a time, in order, instead of racing.
+concurrency:
+  group: release-major-tag
+  cancel-in-progress: false
 
 jobs:
   major-tag:
     runs-on: ubuntu-24.04
+    environment: release
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Move the major tag
         env:
           TAG: ${{ github.ref_name }}
+          DEPLOY_KEY: ${{ secrets.MAJOR_TAG_DEPLOY_KEY }}
         run: |
           set -eu
           git merge-base --is-ancestor "$TAG" origin/main || { echo "$TAG is not on main" >&2; exit 1; }
+          [ -n "$DEPLOY_KEY" ] || { echo "MAJOR_TAG_DEPLOY_KEY is not set in the release environment" >&2; exit 1; }
           major="${TAG%%.*}"
+          key="$RUNNER_TEMP/major-tag-key"
+          trap 'rm -f "$key"' EXIT
+          (umask 077; printf '%s\n' "$DEPLOY_KEY" > "$key")
+          printf '%s\n' "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > "$RUNNER_TEMP/known_hosts"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -f -a "$major" -m "$major: $TAG" "$TAG^{commit}"
-          git push --force origin "refs/tags/$major"
+          GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RUNNER_TEMP/known_hosts" \
+            git push --force "git@github.com:$GITHUB_REPOSITORY.git" "refs/tags/$major"
