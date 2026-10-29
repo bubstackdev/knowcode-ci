@@ -153,6 +153,15 @@ def scope_problems(init, repo, ops=OPS):
     return out
 
 
+def rules_config(repo, paths):
+    """The run's config.toml: `[rules] paths`, relative to the repo, for each rule path given that exists in it."""
+    toml_str = lambda p: '"' + p.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    kept = [p for p in (paths or []) if (Path(repo) / p).exists() and ".." not in Path(p).parts and not Path(p).is_absolute()]
+    if not kept:
+        return ""
+    return "[rules]\npaths = [" + ", ".join(toml_str(p) for p in kept) + "]\n"
+
+
 def review(args):
     repo = Path(args.repo).resolve()
     out = Path(args.out).resolve()
@@ -164,6 +173,8 @@ def review(args):
     config, tmp = cache.parent / (cache.name + "-config"), cache / "tmp"
     for d in (cache, config, tmp):
         d.mkdir(parents=True, exist_ok=True)
+    # The repo's own rule files, if it keeps any: named in the run's config, read from the checkout, never written.
+    (config / "config.toml").write_text(rules_config(repo, args.rules))
     env = {"HOME": str(cache), "PATH": os.environ.get("PATH", "/usr/bin:/bin"), "TMPDIR": str(tmp),
            "KNOWCODE_UPDATE_CHECK": "0", "LANG": "C.UTF-8"}
     argv = [args.knowcode, "serve", "--restricted", "--repo", str(repo), "--ops", ",".join(args.ops),
@@ -230,6 +241,8 @@ def main(argv=None):
     r.add_argument("--base", required=True)
     r.add_argument("--out", required=True)
     r.add_argument("--cache")
+    # Rule files or directories in the repo (relative); those present are read by review's rules section.
+    r.add_argument("--rules", action="append", default=[])
     # The ops the server is given, the first being the one asked: `review` and `more` unless testing.
     r.add_argument("--ops", type=lambda s: tuple(s.split(",")), default=OPS, help=argparse.SUPPRESS)
     c = sub.add_parser("codequality")

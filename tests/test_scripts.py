@@ -54,6 +54,16 @@ class UnchangedTest(unittest.TestCase):
             self.assertTrue(any("refs" in x for x in kc_ci.differences(before, kc_ci.state(d))))
 
 
+class RulesConfigTest(unittest.TestCase):
+    def test_only_relative_paths_present_in_the_repo_are_configured(self):
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, ".knowcode/rules").mkdir(parents=True)
+            Path(d, "lint.yml").write_text("id: x\n")
+            got = kc_ci.rules_config(d, [".knowcode/rules", "lint.yml", "missing", "../outside", "/etc"])
+            self.assertEqual(got, '[rules]\npaths = [".knowcode/rules", "lint.yml"]\n')
+            self.assertEqual(kc_ci.rules_config(d, ["missing"]), "")
+
+
 class CodeQualityTest(unittest.TestCase):
     def test_each_result_location_is_an_issue(self):
         sarif = {"runs": [{"results": [

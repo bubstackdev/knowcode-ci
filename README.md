@@ -40,7 +40,8 @@ jobs:
 ```
 
 Inputs: `version` (the KnowCode release; each release of this action pins one), `base` (default: the pull request's
-base commit), `comment`, `sarif` and `cache` (each `true` by default) and `token` (default: the workflow's
+base commit), `rules` (the repo's ast-grep rule files or directories, one per line, read and never written; default
+`.knowcode/rules`, skipped when absent), `comment`, `sarif` and `cache` (each `true` by default) and `token` (default: the workflow's
 `GITHUB_TOKEN`). Runners need glibc 2.39 or later (Ubuntu 24.04) or macOS on Apple silicon.
 
 ## GitLab
@@ -52,7 +53,8 @@ include:
 
 The `knowcode-review` job runs on merge request pipelines. It posts the review as a merge request note when the
 CI/CD variable `KNOWCODE_GITLAB_TOKEN` holds a project access token (`api` scope, Reporter role), and always reports
-the findings as a code quality report and keeps the review in the job's artifacts.
+the findings as a code quality report and keeps the review in the job's artifacts. `KNOWCODE_RULES` names the repo's
+rule files or directories (default `.knowcode/rules`).
 
 ## Versions
 

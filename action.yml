@@ -14,6 +14,11 @@ inputs:
   base:
     description: Commit, branch or tag to review the change against. Default, the pull request's base commit.
     default: ""
+  rules:
+    description: >-
+      The repo's ast-grep rule files or directories (relative, one per line) for the review's rule matches. Those that
+      don't exist are skipped. They are read, never written.
+    default: .knowcode/rules
   comment:
     description: Post the review as a pull request comment (updated in place on later runs).
     default: "true"
@@ -63,6 +68,7 @@ runs:
       env:
         KC_BIN: ${{ steps.install.outputs.bin }}
         KC_BASE: ${{ inputs.base || github.event.pull_request.base.sha }}
+        KC_RULES: ${{ inputs.rules }}
       run: |
         if [ -z "$KC_BASE" ]; then
           echo "knowcode-ci: no base to review against: set the action's 'base' input, or run it on pull_request" >&2
@@ -72,8 +78,10 @@ runs:
         # itself never touches the network).
         git -C "$GITHUB_WORKSPACE" cat-file -e "$KC_BASE^{commit}" 2>/dev/null || git -C "$GITHUB_WORKSPACE" fetch --no-tags --depth=1 origin "$KC_BASE"
         out="$RUNNER_TEMP/knowcode-review"
+        rules=()
+        while IFS= read -r r; do [ -n "$r" ] && rules+=(--rules "$r"); done <<< "$KC_RULES"
         python3 "$GITHUB_ACTION_PATH/scripts/kc_ci.py" review --knowcode "$KC_BIN" --repo "$GITHUB_WORKSPACE" \
-          --base "$KC_BASE" --out "$out" --cache "$RUNNER_TEMP/knowcode-cache"
+          --base "$KC_BASE" --out "$out" --cache "$RUNNER_TEMP/knowcode-cache" "${rules[@]}"
         echo "markdown=$out/review.md" >> "$GITHUB_OUTPUT"
         echo "sarif=$out/review.sarif" >> "$GITHUB_OUTPUT"
         cat "$out/review.md" >> "$GITHUB_STEP_SUMMARY"

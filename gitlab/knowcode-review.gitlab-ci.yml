@@ -16,6 +16,8 @@ variables:
   KNOWCODE_VERSION: "0.8.0"
   KNOWCODE_CI_REF: "v0.8.0"
   KNOWCODE_GH_VERSION: "2.102.0"
+  # The repo's ast-grep rule files or directories (relative, space-separated) for the review's rule matches.
+  KNOWCODE_RULES: ".knowcode/rules"
 
 knowcode-review:
   stage: test
@@ -42,7 +44,7 @@ knowcode-review:
     - out="$(mktemp -d)"
     - if [ -d .knowcode-cache ]; then mv .knowcode-cache "$out/cache"; fi
     - git cat-file -e "$CI_MERGE_REQUEST_DIFF_BASE_SHA^{commit}"
-    - python3 "$ci/scripts/kc_ci.py" review --knowcode "$bin" --repo "$CI_PROJECT_DIR" --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --out "$out/review" --cache "$out/cache"
+    - python3 "$ci/scripts/kc_ci.py" review --knowcode "$bin" --repo "$CI_PROJECT_DIR" --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --out "$out/review" --cache "$out/cache" $(for r in $KNOWCODE_RULES; do printf -- '--rules %s ' "$r"; done)
     - python3 "$ci/scripts/kc_ci.py" codequality "$out/review/review.sarif" "$out/review/gl-code-quality-report.json"
     - |
       if [ -n "${KNOWCODE_GITLAB_TOKEN:-}" ]; then
