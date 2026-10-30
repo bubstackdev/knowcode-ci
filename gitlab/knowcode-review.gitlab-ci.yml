@@ -14,6 +14,7 @@
 
 variables:
   KNOWCODE_VERSION: "0.8.0"
+  # This template's release (a tag, or a commit to pin one exactly): the scripts the job runs come from it.
   KNOWCODE_CI_REF: "v0.8.0"
   KNOWCODE_GH_VERSION: "2.102.0"
   # The repo's ast-grep rule files or directories (relative, space-separated) for the review's rule matches.
@@ -34,7 +35,7 @@ knowcode-review:
   before_script:
     # The scripts of this template's release, and a GitHub CLI to check the KnowCode release's attestation with.
     - ci="$(mktemp -d)"
-    - curl -fsSL "https://github.com/bubstackdev/knowcode-ci/archive/refs/tags/$KNOWCODE_CI_REF.tar.gz" | tar -xz -C "$ci" --strip-components=1
+    - curl -fsSL "https://github.com/bubstackdev/knowcode-ci/archive/$KNOWCODE_CI_REF.tar.gz" | tar -xz -C "$ci" --strip-components=1
     - '"$ci/scripts/install-gh.sh" "$KNOWCODE_GH_VERSION" "$ci/gh"'
     - export PATH="$ci/gh/bin:$PATH"
     - bin="$("$ci/scripts/install.sh" "$KNOWCODE_VERSION" "$ci/knowcode-bin")"
